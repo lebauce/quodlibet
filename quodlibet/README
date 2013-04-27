@@ -1,0 +1,69 @@
+Ex Falso / Quod Libet - A Music Library/Editor/Player
+=====================================================
+
+Quod Libet is a music management program. It provides several different
+ways to view your audio library, as well as support for Internet radio and
+audio feeds. It has extremely flexible metadata tag editing and searching
+capabilities.
+
+Ex Falso is a tag editor with the same tag editing interface as Quod Libet,
+but it does not play files.
+
+Supported file formats include Ogg Vorbis/Opus/Speex/FLAC, MP3, FLAC,
+MOD/XM/IT, Musepack, Wavpack, MPEG-4 AAC, Monkeys Audio, WMA, SPC, MIDI.
+
+
+Contact & Bug Reports
+---------------------
+
+To report bugs, suggest features, ask a question, get the latest version,
+or help us out, visit http://code.google.com/p/quodlibet/.
+
+IRC: #quodlibet on irc.oftc.net
+Mailing List: http://groups.google.com/group/quod-libet-development
+
+
+Installation Requirements
+-------------------------
+
+* intltool
+* gettext
+
+
+Runtime Requirements
+--------------------
+
+* Python >= 2.6
+* PyGObject >= 3.2
+* GTK+ >= 3.0
+* GStreamer >= 1.0 or xine-lib 1.x
+* Mutagen >= 1.14
+
+
+Optional Runtime Requirements
+-----------------------------
+
+Audio Feed support depends on HTTP support and Universal Feed Parser
+(http://www.feedparser.org/).
+
+Many parts of Quod Libet benefit from D-Bus and its Python bindings
+(http://dbus.freedesktop.org/). iPod support depends on libgpod
+and its Python bindings (http://www.gtkpod.org/).
+
+
+Installation
+------------
+
+::
+
+    ./setup.py build
+    ./setup.py install
+
+
+Tests
+-----
+
+::
+
+    ./setup.py test
+    ./setup.py test --to-run=TestClassName
