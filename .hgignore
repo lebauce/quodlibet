@@ -1,0 +1,30 @@
+syntax: glob
+*.pyc
+*.pyo
+*.so
+*.swp
+*.rej
+*.orig
+*.cache
+*.cover
+*.pot
+*.mo
+*.tar.gz
+MANIFEST
+
+po/missing
+
+# Sphinx build files
+_build*/*
+
+# Ignore build files
+build/*
+
+# Ignore Eclipse files
+.buildpath
+.project
+.settings/*
+.pydevproject
+
+# And IDEA
+.idea/*
