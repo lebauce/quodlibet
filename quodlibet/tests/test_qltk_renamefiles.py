@@ -1,0 +1,80 @@
+import os
+
+from tests import TestCase, AbstractTestCase
+
+from quodlibet.qltk.renamefiles import (SpacesToUnderscores,
+    StripWindowsIncompat)
+from quodlibet.qltk.renamefiles import StripDiacriticals, StripNonASCII
+from quodlibet.qltk.renamefiles import Lowercase
+
+
+class TFilter(AbstractTestCase):
+    def setUp(self):
+        self.c = self.Kind()
+
+    def tearDown(self):
+        self.c.destroy()
+
+    def test_empty(self):
+        v = self.c.filter("", u"")
+        self.failUnlessEqual(v, "")
+        self.failUnless(isinstance(v, unicode))
+
+    def test_safe(self):
+        self.failUnlessEqual(self.c.filter("", u"safe"), "safe")
+
+
+class TSpacesToUnderscores(TFilter):
+    Kind = SpacesToUnderscores
+
+    def test_conv(self):
+        self.failUnlessEqual(self.c.filter("", "foo bar "), "foo_bar_")
+
+
+class TStripWindowsIncompat(TFilter):
+    Kind = StripWindowsIncompat
+
+    def test_conv(self):
+        if os.name == "nt":
+            self.failUnlessEqual(
+                self.c.filter("", u'foo\\:*?;"<>|/'), "foo\\_________")
+        else:
+            self.failUnlessEqual(
+                self.c.filter("", u'foo\\:*?;"<>|/'), "foo_________/")
+
+    def test_type(self):
+        self.assertTrue(isinstance(self.c.filter("", u""), unicode))
+
+    def test_ends_with_dots_or_spaces(self):
+        self.failUnlessEqual(self.c.filter("", u'foo. . '), "foo. ._")
+        if os.name == "nt":
+            self.failUnlessEqual(
+                self.c.filter("", u'foo. \\bar .'), "foo._\\bar _")
+        else:
+            self.failUnlessEqual(
+                self.c.filter("", u'foo. /bar .'), "foo._/bar _")
+
+
+class TStripDiacriticals(TFilter):
+    Kind = StripDiacriticals
+
+    def test_conv(self):
+        self.failUnlessEqual(self.c.filter("", u"\u00c1 test"), "A test")
+
+
+class TStripNonASCII(TFilter):
+    Kind = StripNonASCII
+
+    def test_conv(self):
+        self.failUnlessEqual(
+            self.c.filter("", u"foo \u00c1 \u1234"), "foo _ _")
+
+
+class TLowercase(TFilter):
+    Kind = Lowercase
+
+    def test_conv(self):
+        self.failUnlessEqual(
+            self.c.filter("", u"foobar baz"), "foobar baz")
+        self.failUnlessEqual(
+            self.c.filter("", u"Foobar.BAZ"), "foobar.baz")
