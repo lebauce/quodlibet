@@ -1,0 +1,21 @@
+include COPYING
+include HACKING
+include NEWS
+include README
+include po/*.po
+include po/POTFILES.in
+include po/POTFILES.skip
+include quodlibet/images/README
+recursive-include quodlibet/images/hicolor/ *.theme *.svg *.png
+include tests/data/*
+recursive-include tests *.py
+include gdist/*.py
+include data/*.desktop.in
+include data/*.ini
+include data/*.service.in
+include data/*.appdata.xml.in
+include data/*.1
+include MANIFEST.in
+recursive-include docs conf.py Makefile *.rst *.png
+prune docs/_build_guide
+prune docs/_build_all
