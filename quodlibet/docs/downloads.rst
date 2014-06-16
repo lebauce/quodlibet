@@ -79,28 +79,23 @@ For old releases see the `full file listing <https://bitbucket.org/lazka/quodlib
 |ubuntu-logo| Ubuntu
 --------------------
 
-Stable PPA::
+Stable PPA (12.04+)::
 
     $ sudo add-apt-repository ppa:lazka/ppa
 
 
-Unstable PPA::
+Unstable PPA (12.04+)::
 
     $ sudo add-apt-repository ppa:lazka/dumpingplace
 
+
 .. note::
 
-    Quod Libet 3.x supports **Ubuntu 12.04**, but needs some updated
-    dependencies that you'll need to install separately:
+    To remove the PPAs and revert back to the old version::
 
-    * The `GStreamer Developer PPA
-      <https://launchpad.net/~gstreamer-developers/+archive/ppa?field.series_
-      filter=precise>`__ for GStreamer 1.0.
-    * *(optional)* Ubuntu 12.10 packages of both `gir1.2-keybinder-3.0
-      <http://packages.ubuntu.com/quantal/gir1.2-keybinder-3.0>`__ and
-      `libkeybinder-3.0-0
-      <http://packages.ubuntu.com/quantal/libkeybinder-3.0-0>`__ for
-      multimedia key support under non GNOME environments.
+        $ sudo add-get install ppa-purge
+        $ sudo ppa-purge ppa:lazka/ppa
+        $ sudo ppa-purge ppa:lazka/dumpingplace
 
 .. _debian:
 
@@ -196,17 +191,8 @@ the `AUR <https://wiki.archlinux.org/index.php/AUR>`__.
 Install mercurial and check out the source::
 
     $ hg clone https://code.google.com/p/quodlibet/
-    $ cd quodlibet
+    $ cd quodlibet/quodlibet
 
-QL/EF expects the plugins to be in "~/.quodlibet/plugins" so
-create a symlink::
-
-    $ mkdir ~/.quodlibet
-    $ ln -s $(readlink -f plugins) ~/.quodlibet/plugins
-
-Now switch to the real QL folder::
-
-    $ cd quodlibet
 
 If you want translations, you have to create the gettext translation files::
 

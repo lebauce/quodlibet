@@ -36,10 +36,10 @@ def main():
         control('focus')
 
     import quodlibet
-    quodlibet._init_signal()
+    from quodlibet import app
+    quodlibet._init_signal(app.quit)
 
     import quodlibet.player
-    from quodlibet import app
     from quodlibet import config
     from quodlibet import browsers
     from quodlibet import const
@@ -54,6 +54,7 @@ def main():
     app.library = library
 
     from quodlibet.player import PlayerError
+    # this assumes that nullbe will always succeed
     for backend in [config.get("player", "backend"), "nullbe"]:
         try:
             player = quodlibet.init_backend(backend, app.librarian)

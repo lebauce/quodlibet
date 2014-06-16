@@ -89,6 +89,13 @@ function clone_repo {
     hg clone "$QL_REPO" "$QL_TEMP"
     (cd "$QL_TEMP" && hg up "$1") || exit 1
     QL_VERSION=$(cd "$QL_TEMP"/quodlibet && python -c "import quodlibet.const;print quodlibet.const.VERSION,")
+
+    if [ "$1" = "default" ]
+    then
+        local HG_REV=$(hg id -n | sed 's/[+]//g')
+        local HG_HASH=$(hg id -i | sed 's/[+]//g')
+        QL_VERSION="$QL_VERSION-rev$HG_REV-$HG_HASH"
+    fi
 }
 
 function extract_deps {
@@ -201,11 +208,6 @@ function build_quodlibet {
     cp -RT "$QL_LOCALE" "$MAIN_LOCALE"
     # remove the gtk30-properties domain -> not visible to the user
     find "$MAIN_LOCALE" -name "gtk30-properties.mo" -exec rm {} \;
-
-    # copy plugins; byte compile them; remove leftover *.py files
-    cp -RT "$QL_TEMP"/plugins "$QL_BIN"/quodlibet/plugins
-    wine "$PYDIR"/python.exe -m compileall $(wine winepath -w "$QL_BIN"/quodlibet/plugins)
-    find "$QL_DEST" -name "*.py" | xargs -I {} rm -v "{}"
 
     # remove gtk themes except HighContrast/Adwaita/Default
     GTK_THEMES="$QL_DEST"/share/themes

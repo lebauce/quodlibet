@@ -40,6 +40,7 @@ from quodlibet.qltk.queue import QueueExpander
 from quodlibet.qltk.songlist import SongList
 from quodlibet.qltk.songmodel import PlaylistMux
 from quodlibet.qltk.x import RPaned, ConfigRVPaned, Alignment, ScrolledWindow
+from quodlibet.qltk.x import SymbolicIconImage
 from quodlibet.qltk.about import AboutQuodLibet
 from quodlibet.util import copool, gobject_weak
 from quodlibet.util.library import get_scan_dirs, set_scan_dirs
@@ -72,15 +73,15 @@ class CurrentColumn(SongListColumn):
         ERROR = "dialog-error"
 
         row = model[iter_]
-        song = row[0]
 
         if row.path == model.current_path:
-            if model.sourced:
-                name = [PLAY, PAUSE][app.player.paused]
+            player = app.player
+            if player.error:
+                name = ERROR
+            elif model.sourced:
+                name = [PLAY, PAUSE][player.paused]
             else:
                 name = STOP
-        elif song("~errors"):
-            name = ERROR
         else:
             name = None
 
@@ -114,16 +115,19 @@ class MainSongList(SongList):
         s = player.connect_after('song-started', reset_activated)
         self.connect_object('destroy', player.disconnect, s)
 
+        self.connect("orders-changed", self.__orders_changed)
+
+    def __orders_changed(self, *args):
+        l = []
+        for tag, reverse in self.get_sort_orders():
+            l.append("%d%s" % (int(reverse), tag))
+        config.setstringlist('memory', 'sortby', l)
+
     def __select_song(self, player, indices, col):
         self._activated = True
         iter = self.model.get_iter(indices)
         if player.go_to(iter, True):
             player.paused = False
-
-    def set_sort_by(self, *args, **kwargs):
-        super(MainSongList, self).set_sort_by(*args, **kwargs)
-        tag, reverse = self.get_sort_by()
-        config.set('memory', 'sortby', "%d%s" % (int(reverse), tag))
 
 
 class SongListScroller(ScrolledWindow):
@@ -193,27 +197,55 @@ class TopBar(Gtk.Toolbar):
             library.albums.refresh(refresh_albums)
 
 
+class ReapeatButton(Gtk.ToggleButton):
+
+    def __init__(self):
+        super(ReapeatButton, self).__init__(
+            image=SymbolicIconImage(
+                "media-playlist-repeat", Gtk.IconSize.SMALL_TOOLBAR))
+
+        style_provider = Gtk.CssProvider()
+        css = """
+            #ql-repeat-button {
+                padding: 0px;
+            }
+        """
+        style_provider.load_from_data(css)
+
+        self.set_name("ql-repeat-button")
+        self.set_size_request(26, 26)
+
+        style_context = self.get_style_context()
+        style_context.add_provider(
+            style_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.set_tooltip_text(_("Restart the playlist when finished"))
+
+        self.bind_config("settings", "repeat")
+
+    def bind_config(self, section, option):
+        self.set_active(config.getboolean(section, option))
+
+        def toggled_cb(*args):
+            config.set(section, option, self.get_active())
+
+        self.connect('toggled', toggled_cb)
+
+
 class StatusBarBox(Gtk.HBox):
+
     def __init__(self, model, player):
-        super(StatusBarBox, self).__init__(spacing=12)
+        super(StatusBarBox, self).__init__(spacing=6)
 
         self.order = order = PlayOrder(model, player)
+        self.pack_start(order, False, True, 0)
 
-        hb = Gtk.HBox(spacing=6)
-        label = Gtk.Label(label=_("_Order:"))
-        label.set_mnemonic_widget(order)
-        label.set_use_underline(True)
-        hb.pack_start(label, True, True, 0)
-        hb.pack_start(order, True, True, 0)
-        self.pack_start(hb, False, True, 0)
-
-        self.repeat = repeat = qltk.ccb.ConfigCheckButton(
-            _("_Repeat"), "settings", "repeat")
-        repeat.set_tooltip_text(_("Restart the playlist when finished"))
+        self.repeat = repeat = ReapeatButton()
         self.pack_start(repeat, False, True, 0)
-
         repeat.connect('toggled', self.__repeat, model)
-        repeat.set_active(config.getboolean('settings', 'repeat'))
+        model.repeat = repeat.get_active()
 
         self.statusbar = StatusBar(TaskController.default_instance)
         self.pack_start(self.statusbar, True, True, 0)
@@ -312,6 +344,19 @@ class AppMenu(object):
             self._bus = None
 
 
+class PlaybackErrorDialog(ErrorMessage):
+
+    def __init__(self, parent, player_error):
+        add_full_stop = lambda s: s and (s.rstrip(".") + ".")
+        description = add_full_stop(util.escape(player_error.short_desc))
+        details = add_full_stop(util.escape(player_error.long_desc or ""))
+        if details:
+            description += " " + details
+
+        super(PlaybackErrorDialog, self).__init__(
+            parent, _("Playback Error"), description)
+
+
 DND_URI_LIST, = range(1)
 
 
@@ -374,7 +419,7 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         self.statusbar = statusbox.statusbar
 
         main_box.pack_start(
-            Alignment(statusbox, border=3, top=-3, left=6, right=6),
+            Alignment(statusbox, border=3, top=-3, right=6),
             False, True, 0)
 
         self.songpane = ConfigRVPaned("memory", "queue_position", 0.75)
@@ -382,14 +427,36 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         self.songpane.pack2(self.qexpander, resize=True, shrink=False)
         self.__handle_position = self.songpane.get_property("position")
 
+        def songpane_button_press_cb(pane, event):
+            """If we start to drag the pane handle while the
+            queue expander is unexpanded, expand it and move the handle
+            to the bottom, so we can 'drag' the queue out
+            """
+
+            if event.window != pane.get_handle_window():
+                return False
+
+            if not self.qexpander.get_expanded():
+                self.qexpander.set_expanded(True)
+                pane.set_relative(1.0)
+            return False
+
+        self.songpane.connect("button-press-event", songpane_button_press_cb)
+
         self.song_scroller.connect('notify::visible', self.__show_or)
         self.qexpander.connect('notify::visible', self.__show_or)
         self.qexpander.connect('notify::expanded', self.__expand_or)
         self.qexpander.connect('draw', self.__qex_size_allocate)
         self.songpane.connect('notify', self.__moved_pane_handle)
 
-        sort = config.get('memory', 'sortby')
-        self.songlist.set_sort_by(None, sort[1:], order=int(sort[0]))
+        try:
+            orders = []
+            for e in config.getstringlist('memory', 'sortby', []):
+                orders.append((e[1:], int(e[0])))
+        except ValueError:
+            pass
+        else:
+            self.songlist.set_sort_orders(orders)
 
         self.browser = None
         self.ui = ui
@@ -426,6 +493,7 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         gobject_weak(lib.connect_object, 'changed', self.__song_changed,
                      player, parent=self)
 
+        self._playback_error_dialog = None
         player_sigs = [
             ('song-started', self.__song_started),
             ('paused', self.__update_paused, True),
@@ -433,6 +501,11 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         ]
         for sig in player_sigs:
             gobject_weak(player.connect, *sig, **{"parent": self})
+
+        # make sure we redraw all error indicators before opening
+        # a dialog (blocking the main loop), so connect after default handlers
+        gobject_weak(player.connect_after, 'error',
+                     self.__player_error, **{"parent": self})
 
         # connect after to let SongTracker update stats
         player_sigs.append(
@@ -458,6 +531,15 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         self.connect("destroy", self.__destroy)
 
         self.enable_window_tracking("quodlibet")
+
+    def __player_error(self, player, song, player_error):
+        # it's modal, but mmkeys etc. can still trigger new ones
+        if self._playback_error_dialog:
+            self._playback_error_dialog.destroy()
+        dialog = PlaybackErrorDialog(self, player_error)
+        self._playback_error_dialog = dialog
+        dialog.run()
+        self._playback_error_dialog = None
 
     def __configure_scan_dirs(self, library):
         """Get user to configure scan dirs, if none is set up"""
@@ -552,7 +634,7 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
     def __songlist_drag_data_recv(self, view, *args):
         if callable(self.browser.reordered):
             self.browser.reordered(view)
-        self.songlist.set_sort_by(None, refresh=False)
+        self.songlist.clear_sort()
 
     def __save_browser(self, *args):
         print_d("Saving active browser state")
@@ -589,7 +671,7 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
                 self.songpane.set_property("position", p_max)
 
     def __create_menu(self, player, library):
-        ag = Gtk.ActionGroup('QuodLibetWindowActions')
+        ag = Gtk.ActionGroup.new('QuodLibetWindowActions')
 
         def logging_cb(*args):
             window = LoggingWindow(self)
@@ -646,36 +728,38 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
 
         ag.add_actions(actions)
 
-        act = Gtk.ToggleAction("StopAfter",
-                               _("Stop After This Song"), None, "")
+        act = Gtk.ToggleAction.new("StopAfter",
+                                   _("Stop After This Song"), None, "")
         ag.add_action_with_accel(act, "<shift>space")
 
         # access point for the tray icon
         self.stop_after = act
 
-        act = Gtk.Action("AddBookmark", _("Add Bookmark"), None, Gtk.STOCK_ADD)
+        act = Gtk.Action.new(
+            "AddBookmark", _("Add Bookmark"), None, Gtk.STOCK_ADD)
         act.connect_object('activate', self.__add_bookmark,
                            library.librarian, player)
         ag.add_action_with_accel(act, "<ctrl>D")
 
-        act = Gtk.Action("EditBookmarks", _(u"Edit Bookmarks…"), None, "")
+        act = Gtk.Action.new("EditBookmarks", _(u"Edit Bookmarks…"), None, "")
         act.connect_object('activate', self.__edit_bookmarks,
                            library.librarian, player)
         ag.add_action_with_accel(act, "<ctrl>B")
 
-        act = Gtk.Action("About", None, None, Gtk.STOCK_ABOUT)
+        act = Gtk.Action.new("About", None, None, Gtk.STOCK_ABOUT)
         act.connect_object('activate', self.__show_about, player)
         ag.add_action_with_accel(act, None)
 
-        act = Gtk.Action("OnlineHelp", _("Online Help"), None, Gtk.STOCK_HELP)
+        act = Gtk.Action.new(
+            "OnlineHelp", _("Online Help"), None, Gtk.STOCK_HELP)
         act.connect_object('activate', util.website, const.ONLINE_HELP)
         ag.add_action_with_accel(act, "F1")
 
-        act = Gtk.Action("SearchHelp", _("Search Help"), None, "")
+        act = Gtk.Action.new("SearchHelp", _("Search Help"), None, "")
         act.connect_object('activate', util.website, const.SEARCH_HELP)
         ag.add_action_with_accel(act, None)
 
-        act = Gtk.Action(
+        act = Gtk.Action.new(
             "RefreshLibrary", _("Re_fresh Library"), None, Gtk.STOCK_REFRESH)
         act.connect('activate', self.__rebuild, False)
         ag.add_action_with_accel(act, None)
@@ -684,7 +768,7 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
             ("genre", _("Filter on _Genre")),
             ("artist", _("Filter on _Artist")),
             ("album", _("Filter on Al_bum"))]:
-            act = Gtk.Action(
+            act = Gtk.Action.new(
                 "Filter%s" % util.capitalize(tag_), lab, None, Gtk.STOCK_INDEX)
             act.connect_object('activate',
                                self.__filter_on, tag_, None, player)
@@ -694,8 +778,8 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
             ("genre", "G", _("Random _Genre")),
             ("artist", "T", _("Random _Artist")),
             ("album", "M", _("Random Al_bum"))]:
-            act = Gtk.Action("Random%s" % util.capitalize(tag_), label,
-                             None, Gtk.STOCK_DIALOG_QUESTION)
+            act = Gtk.Action.new("Random%s" % util.capitalize(tag_), label,
+                                 None, Gtk.STOCK_DIALOG_QUESTION)
             act.connect('activate', self.__random, tag_)
             ag.add_action_with_accel(act, "<control>" + accel)
 

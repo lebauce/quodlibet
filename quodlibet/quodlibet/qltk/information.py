@@ -22,8 +22,8 @@ from quodlibet.util import tag
 from quodlibet.util.path import fsdecode, filesize, unexpand
 
 
-def Label(*args):
-    l = Gtk.Label(*args)
+def Label(label=None):
+    l = Gtk.Label(label=label)
     l.set_selectable(True)
     l.set_alignment(0, 0)
     return l
@@ -48,34 +48,9 @@ def SW():
     return swin
 
 
-class ErrorPane(Gtk.VBox):
-    def __init__(self, song):
-        super(ErrorPane, self).__init__(spacing=6)
-        self.set_border_width(12)
-        sw = Gtk.ScrolledWindow()
-        view = Gtk.TextView()
-        view.get_buffer().set_text(song.get("~errors", ""))
-        view.set_wrap_mode(Gtk.WrapMode.WORD)
-        sw.add(view)
-        sw.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        sw.set_shadow_type(Gtk.ShadowType.IN)
-        button = qltk.Button(_("_Clear Errors"), Gtk.STOCK_DIALOG_ERROR)
-        button.connect('clicked', self.__clear_errors, song, view)
-        view.set_editable(False)
-        self.pack_start(sw, True, True, 0)
-        self.pack_start(button, False, True, 0)
-
-    def __clear_errors(self, button, song, view):
-        try:
-            del(song["~errors"])
-        except KeyError:
-            pass
-        view.get_buffer().set_text("")
-
-
 class NoSongs(Gtk.Label):
     def __init__(self):
-        super(NoSongs, self).__init__(_("No songs are selected."))
+        super(NoSongs, self).__init__(label=_("No songs are selected."))
         self.title = _("No Songs")
 
 
@@ -101,11 +76,6 @@ class OneSong(qltk.Notebook):
         bookmarks.title = _("Bookmarks")
         bookmarks.set_border_width(12)
         self.append_page(bookmarks)
-
-        if "~errors" in song:
-            errors = ErrorPane(song)
-            errors.title = _("Errors")
-            self.append_page(errors)
 
         s = library.connect('changed', self.__check_changed, vbox, song)
         self.connect_object('destroy', library.disconnect, s)
@@ -263,7 +233,7 @@ class OneSong(qltk.Notebook):
         added = ftime(song.get("~#added", 0))
         rating = song("~rating")
 
-        t = Gtk.Table(5, 2)
+        t = Gtk.Table(n_rows=5, n_columns=2)
         t.set_col_spacings(6)
         t.set_homogeneous(False)
         table = [(_("added"), added),
@@ -300,7 +270,7 @@ class OneSong(qltk.Notebook):
         else:
             bitrate = False
 
-        t = Gtk.Table(4, 2)
+        t = Gtk.Table(n_rows=4, n_columns=2)
         t.set_col_spacings(6)
         t.set_homogeneous(False)
         table = [(_("length"), length),
@@ -518,7 +488,7 @@ class OneArtist(qltk.Notebook):
         box.pack_start(Frame(_("Selected Discography"), l), False, False, 0)
 
         covers = [ac for ac in covers if bool(ac[1])]
-        t = Gtk.Table(4, (len(covers) // 4) + 1)
+        t = Gtk.Table(n_rows=4, n_columns=(len(covers) // 4) + 1)
         t.set_col_spacings(12)
         t.set_row_spacings(12)
         added = set()
@@ -603,7 +573,7 @@ class ManySongs(qltk.Notebook):
                 size += filesize(song["~filename"])
             except EnvironmentError:
                 pass
-        table = Gtk.Table(2, 2)
+        table = Gtk.Table(n_rows=2, n_columns=2)
         table.set_col_spacings(6)
         table.attach(Label(_("Total length:")), 0, 1, 0, 1,
                      xoptions=Gtk.AttachOptions.FILL)
@@ -618,7 +588,6 @@ class ManySongs(qltk.Notebook):
 class Information(Window, PersistentWindowMixin):
     def __init__(self, library, songs, parent=None):
         super(Information, self).__init__(dialog=False)
-        self.set_border_width(12)
         self.set_default_size(400, 400)
         self.enable_window_tracking("quodlibet_information")
         if len(songs) > 1:

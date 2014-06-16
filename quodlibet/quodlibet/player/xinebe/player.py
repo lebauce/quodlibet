@@ -50,6 +50,8 @@ class XinePlaylistPlayer(BasePlayer):
     _paused = True
 
     def __init__(self, driver, librarian):
+        """May raise PlayerError"""
+
         super(XinePlaylistPlayer, self).__init__()
         self.name = "xine"
         self.version_info = "xine-lib: " + xine_get_version_string()
@@ -145,7 +147,8 @@ class XinePlaylistPlayer(BasePlayer):
                     message = string_at(addressof(msg) + msg.explanation)
                 else:
                     message = "xine error %s" % msg.type
-                GLib.idle_add(self._error, message)
+                message = message.decode("utf-8", errors="replace")
+                GLib.idle_add(self._error, PlayerError(message))
         return True
 
     def do_set_property(self, property, v):
@@ -201,14 +204,17 @@ class XinePlaylistPlayer(BasePlayer):
 
     paused = property(lambda s: s._paused, _set_paused)
 
-    def _error(self, message):
+    def _error(self, player_error=None):
         if self._destroyed:
             return False
 
-        self._stop()
-        self.emit('error', self.song, message)
-        if not self.paused:
-            self.next()
+        if self.error:
+            return False
+
+        self.error = True
+        self.paused = True
+        if player_error:
+            self.emit('error', self.song, player_error)
 
     def seek(self, pos):
         """Seek to a position in the song, in milliseconds."""
@@ -226,6 +232,9 @@ class XinePlaylistPlayer(BasePlayer):
         song = self.song
         self.song = self.info = None
         self.emit('song-ended', song, stopped)
+
+        # reset error state
+        self.error = False
 
         # Then, set up the next song.
         self.song = self.info = self._source.current
@@ -276,6 +285,8 @@ class XinePlaylistPlayer(BasePlayer):
 
 
 def init(librarian):
+    """May raise PlayerError"""
+
     try:
         driver = config.get("settings", "xine_driver")
     except:
