@@ -22,7 +22,6 @@ from quodlibet.qltk.ratingsmenu import ConfirmRateMultipleDialog
 from quodlibet.qltk.songmodel import PlaylistModel
 from quodlibet.util.uri import URI
 from quodlibet.formats._audio import TAG_TO_SORT, AudioFile
-from quodlibet.qltk.sortdialog import SortDialog
 from quodlibet.qltk.x import SeparatorMenuItem
 from quodlibet.util import human_sort_key
 from quodlibet.qltk.songlistcolumns import create_songlist_column
@@ -105,6 +104,41 @@ class SongInfoSelection(GObject.Object):
         else:
             self.__emit_info_selection()
         self.__count = count
+
+
+def get_sort_tag(tag):
+    """Returns a tag that can be used for sorting for the given column tag.
+
+    Returns '' if the default sort key should be used.
+    """
+
+    replace_order = {
+        "~#track": "",
+        "~#disc": "",
+        "~length": "~#length"
+    }
+
+    if tag == "~title~version":
+        tag = "title"
+    elif tag == "~album~discsubtitle":
+        tag = "album"
+
+    if tag.startswith("<"):
+        for key, value in replace_order.iteritems():
+            tag = tag.replace("<%s>" % key, "<%s>" % value)
+        tag = Pattern(tag).format
+    else:
+        tags = util.tagsplit(tag)
+        sort_tags = []
+        for tag in tags:
+            tag = replace_order.get(tag, tag)
+            tag = TAG_TO_SORT.get(tag, tag)
+            if tag not in sort_tags:
+                sort_tags.append(tag)
+        if len(sort_tags) > 1:
+            tag = "~" + "~".join(sort_tags)
+
+    return tag
 
 
 class SongListDnDMixin(object):
@@ -260,8 +294,14 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
                util.InstanceTracker):
     # A TreeView containing a list of songs.
 
+    __gsignals__ = {
+        # changed(songs:list)
+        'orders-changed': (GObject.SignalFlags.RUN_LAST, None, [])
+    }
+
     headers = [] # The list of current headers.
     star = list(Query.STAR)
+    sortable = True
 
     def Menu(self, header, browser, library):
         songs = self.get_selected_songs()
@@ -309,6 +349,9 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         self.set_fixed_height_mode(True)
         self.__csig = self.connect('columns-changed', self.__columns_changed)
         self._first_column = None
+        # A priority list of how to apply the sort keys.
+        # might contain column header names not present...
+        self._sort_sequence = []
         self.set_column_headers(self.headers)
         librarian = library.librarian or library
         sigs = []
@@ -324,8 +367,11 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         for sig in sigs:
             self.connect_object('destroy', librarian.disconnect, sig)
         if player:
-            sigs = [player.connect('paused', self.__redraw_current),
-                    player.connect('unpaused', self.__redraw_current)]
+            sigs = [
+                player.connect('paused', lambda *x: self.__redraw_current()),
+                player.connect('unpaused', lambda *x: self.__redraw_current()),
+                player.connect('error', lambda *x: self.__redraw_current()),
+            ]
             for sig in sigs:
                 self.connect_object('destroy', player.disconnect, sig)
 
@@ -338,6 +384,136 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         self.set_search_equal_func(self.__search_func, None)
 
         self.connect('destroy', self.__destroy)
+
+    @property
+    def model(self):
+        return self.get_model()
+
+    def toggle_column_sort(self, column, replace=True, refresh=True):
+        """Toggles the sort order of a column.
+
+        If not sorted, defaults to Gtk.SortType.ASCENDING
+
+        If replace is False, the column will be appended to existing
+        sorted columns. If it replaces a sort sequence where it was part of
+        before it will not toggle itself, only remove the other ones.
+
+        If refresh is True, the song list will be resorted.
+        """
+
+        if not self.sortable:
+            return
+
+        # update the sort priority list
+        if replace:
+            del self._sort_sequence[:]
+        else:
+            try:
+                self._sort_sequence.remove(column.header_name)
+            except ValueError:
+                pass
+        self._sort_sequence.append(column.header_name)
+
+        # in case we replace a multi sort with one sort that was part before
+        # don't toggle, because it usually means we want to get rid of
+        # the other one
+        dont_reverse = False
+        if replace and column.get_sort_indicator():
+            for c in self.get_columns():
+                if c is not column and c.get_sort_indicator():
+                    dont_reverse = True
+                    break
+
+        # set the inidicators
+        default_order = Gtk.SortType.ASCENDING
+        reversed_ = False
+        for c in self.get_columns():
+            if c is column:
+                if c.get_sort_indicator():
+                    if dont_reverse:
+                        order = c.get_sort_order()
+                    else:
+                        order = not c.get_sort_order()
+                        reversed_ = True
+                else:
+                    order = default_order
+                c.set_sort_order(order)
+                c.set_sort_indicator(True)
+                if not replace:
+                    break
+            elif replace:
+                c.set_sort_indicator(False)
+
+        if refresh:
+            songs = self.get_songs()
+            if reversed_:
+                # python sort is faster if presorted
+                songs.reverse()
+            self.set_songs(songs)
+
+        self.emit("orders-changed")
+
+    def find_default_sort_column(self):
+        """Returns a column that will sort using only the default sort key
+        or None if none can't be found
+        """
+
+        for c in self.get_columns():
+            # get_sort_tag == "" if the default sort key should be used
+            if not get_sort_tag(c.header_name):
+                return c
+
+    def is_sorted(self):
+        """If any of the columns has a sort indicator.
+
+        This does not mean that the list content is sorted.
+        """
+
+        for c in self.get_columns():
+            if c.get_sort_indicator():
+                return True
+        return False
+
+    def clear_sort(self):
+        """Remove all column sort indicators"""
+
+        for h in self.get_columns():
+            h.set_sort_indicator(False)
+        del self._sort_sequence[:]
+
+        self.emit("orders-changed")
+
+    def get_sort_orders(self):
+        """Returns a list of tuples (header_name, descending)"""
+
+        sorted_ = [c for c in self.get_columns() if c.get_sort_indicator()]
+
+        # if someone adds columns and sorts them using the TV API directly..
+        # better not crash I guess
+        for c in sorted_:
+            if c.header_name not in self._sort_sequence:
+                self._sort_sequence.append(c.header_name)
+
+        sorted_.sort(key=lambda c: self._sort_sequence.index(c.header_name))
+        return [(c.header_name, bool(c.get_sort_order())) for c in sorted_]
+
+    def set_sort_orders(self, orders):
+        """Pass a value returned by get_sort_orders() to restore the state"""
+
+        if not self.sortable:
+            return
+
+        self._sort_sequence = [tag for tag, o in orders]
+
+        orders = dict(orders)
+        for c in self.get_columns():
+            if c.header_name in orders:
+                c.set_sort_indicator(True)
+                c.set_sort_order(orders[c.header_name])
+            else:
+                c.set_sort_indicator(False)
+
+        self.emit("orders-changed")
 
     def __destroy(self, *args):
         self.info.destroy()
@@ -368,34 +544,6 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
                 return
 
         browser.filter_on(songs, header)
-
-    def __custom_sort(self, *args):
-        sd = SortDialog(qltk.get_top_parent(self))
-        if sd.run() == Gtk.ResponseType.OK:
-            # sort_keys yields a list of pairs (sort header, order)
-            headers = sd.sort_key
-            if not headers:
-                return
-
-            # from this, we have to construct a comparison function for sort
-            def _get_key(song, tag):
-                if tag.startswith("~#") and "~" not in tag[2:]:
-                    return song(tag)
-                return human_sort_key(song(tag))
-
-            def comparer(x, y):
-                for (h, o) in headers:
-                    c = cmp(_get_key(x, h), _get_key(y, h))
-                    if c == 0:
-                        continue
-                    if o != Gtk.SortType.ASCENDING:
-                        c *= -1
-                    return c
-                return 0
-            songs = self.get_songs()
-            songs.sort(cmp=comparer)
-            self.set_songs(songs, sorted=True)
-        sd.hide()
 
     def __button_press(self, view, event, librarian):
         if event.button != Gdk.BUTTON_PRIMARY:
@@ -470,8 +618,8 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
             from quodlibet import app
             app.window.playlist.enqueue(songs)
 
-    def __redraw_current(self, player, song=None):
-        model = self.model
+    def __redraw_current(self):
+        model = self.get_model()
         iter_ = model.current_iter
         if iter_:
             path = model.get_path(iter_)
@@ -524,101 +672,45 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
                     star.append(tag)
         SongList.star = star
 
-    def get_sort_by(self):
-        for header in self.get_columns():
-            if header.get_sort_indicator():
-                tag = header.header_name
-                sort = header.get_sort_order()
-                return (tag, sort == Gtk.SortType.DESCENDING)
-        else:
-            return "", False
-
-    def is_sorted(self):
-        return max([c.get_sort_indicator() for c in self.get_columns()] or [0])
-
-    # Resort based on the header clicked.
-    def set_sort_by(self, header, tag=None, order=None, refresh=True):
-        if header and tag is None:
-            tag = header.header_name
-
-        rev = False
-        for h in self.get_columns():
-            if h.header_name == tag:
-                if order is None:
-                    s = header.get_sort_order()
-                    if (not header.get_sort_indicator() or
-                        s == Gtk.SortType.DESCENDING):
-                        s = Gtk.SortType.ASCENDING
-                    else:
-                        s = Gtk.SortType.DESCENDING
-                else:
-                    if order:
-                        s = Gtk.SortType.DESCENDING
-                    else:
-                        s = Gtk.SortType.ASCENDING
-                rev = h.get_sort_indicator()
-                h.set_sort_indicator(True)
-                h.set_sort_order(s)
-            else:
-                h.set_sort_indicator(False)
-        if refresh:
-            songs = self.get_songs()
-            if rev:  # python sort is faster if it's presorted.
-                songs.reverse()
-            self.set_songs(songs)
-
-    def set_sort_by_tag(self, tag, order=None):
-        for h in self.get_columns():
-            name = h.header_name
-            if self.__get_sort_tag(name) == tag:
-                if order:
-                    s = Gtk.SortType.DESCENDING
-                else:
-                    s = Gtk.SortType.ASCENDING
-                h.set_sort_order(s)
-                h.set_sort_indicator(True)
-            else:
-                h.set_sort_indicator(False)
-
     def set_model(self, model):
         super(SongList, self).set_model(model)
-        self.model = model
         self.set_search_column(0)
 
     def get_songs(self):
-        try:
-            return self.get_model().get()
-        except AttributeError:
-            return [] # model is None
+        """Get all songs currently in the song list"""
 
-    def __get_sort_tag(self, tag):
-        replace_order = {
-            "~#track": "",
-            "~#disc": "",
-            "~length": "~#length"
-        }
+        model = self.get_model()
+        if not model:
+            return []
+        return model.get()
 
-        if tag == "~title~version":
-            tag = "title"
-        elif tag == "~album~discsubtitle":
-            tag = "album"
+    def _sort_songs(self, songs):
+        """Sort passed songs in place based on the column sort orders"""
 
-        if tag.startswith("<"):
-            for key, value in replace_order.iteritems():
-                tag = tag.replace("<%s>" % key, "<%s>" % value)
-            tag = Pattern(tag).format
-        else:
-            tags = util.tagsplit(tag)
-            sort_tags = []
-            for tag in tags:
-                tag = replace_order.get(tag, tag)
-                tag = TAG_TO_SORT.get(tag, tag)
-                if tag not in sort_tags:
-                    sort_tags.append(tag)
-            if len(sort_tags) > 1:
-                tag = "~" + "~".join(sort_tags)
+        last_tag = None
+        last_order = None
+        first = True
+        for tag, reverse in self.get_sort_orders():
+            tag = get_sort_tag(tag)
 
-        return tag
+            # always sort using the default sort key first
+            if first:
+                first = False
+                songs.sort(key=lambda s: s.sort_key, reverse=reverse)
+                last_order = reverse
+                last_tag = ""
+
+            # no need to sort twice in a row with the same key/order
+            if tag == last_tag and last_order == reverse:
+                continue
+            last_order = reverse
+            last_tag = tag
+
+            if tag == "":
+                songs.sort(key=lambda s: s.sort_key, reverse=reverse)
+            else:
+                sort_func = AudioFile.sort_by_func(tag)
+                songs.sort(key=sort_func, reverse=reverse)
 
     def add_songs(self, songs):
         """Add songs to the list in the right order and position"""
@@ -631,46 +723,37 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
             self.set_songs(songs)
             return
 
-        tag, reverse = self.get_sort_by()
-        tag = self.__get_sort_tag(tag)
-
         if not self.is_sorted():
-            self.set_sort_by_tag(tag, reverse)
+            model.append_many(songs)
+            return
 
         # FIXME: Replace with something fast
-
         old_songs = self.get_songs()
         old_songs.extend(songs)
 
-        if not tag:
-            old_songs.sort(key=lambda s: s.sort_key, reverse=reverse)
-        else:
-            sort_func = AudioFile.sort_by_func(tag)
-            old_songs.sort(key=lambda s: s.sort_key)
-            old_songs.sort(key=sort_func, reverse=reverse)
+        self._sort_songs(old_songs)
 
         for index, song in sorted(zip(map(old_songs.index, songs), songs)):
             model.insert(index, row=[song])
 
     def set_songs(self, songs, sorted=False):
+        """Fill the song list.
+
+        If sorted is True, the passed songs will not be sorted and
+        all sort indicators will be removed.
+        """
+
         model = self.get_model()
 
         if not sorted:
-            tag, reverse = self.get_sort_by()
-            tag = self.__get_sort_tag(tag)
-
-            #try to set a sort indicator that matches the default order
+            # make sure some sorting is set and visible
             if not self.is_sorted():
-                self.set_sort_by_tag(tag, reverse)
-
-            if not tag:
-                songs.sort(key=lambda s: s.sort_key, reverse=reverse)
-            else:
-                sort_func = AudioFile.sort_by_func(tag)
-                songs.sort(key=lambda s: s.sort_key)
-                songs.sort(key=sort_func, reverse=reverse)
+                default = self.find_default_sort_column()
+                if default:
+                    self.toggle_column_sort(default, refresh=False)
+            self._sort_songs(songs)
         else:
-            self.set_sort_by(None, refresh=False)
+            self.clear_sort()
 
         with self.without_model() as model:
             model.set(songs)
@@ -705,6 +788,8 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         return True
 
     def get_selected_songs(self):
+        """Returns a list of selected songs"""
+
         songs = []
 
         def func(model, path, iter_, user_data):
@@ -738,7 +823,7 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         # The selected songs are removed from the library and should
         # be removed from the view.
 
-        if not len(self.model):
+        if not len(self.get_model()):
             return
 
         songs = set(songs)
@@ -797,7 +882,7 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
 
         self.handler_block(self.__csig)
 
-        old_sort = self.is_sorted() and self.get_sort_by()
+        old_sort = self.get_sort_orders()
         for column in self.get_columns():
             self.remove_column(column)
 
@@ -825,7 +910,19 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
                 else:
                     column.set_expand(True)
 
-            column.connect('clicked', self.set_sort_by)
+            def column_clicked(column, *args):
+                # if ctrl is held during the sort click, append a sort key
+                # or change order if already sorted
+                ctrl_held = False
+                event = Gtk.get_current_event()
+                if event:
+                    ok, state = event.get_state()
+                    if ok and state & Gdk.ModifierType.CONTROL_MASK:
+                        ctrl_held = True
+
+                self.toggle_column_sort(column, replace=not ctrl_held)
+
+            column.connect('clicked', column_clicked)
             column.connect('button-press-event', self.__showmenu)
             column.connect('popup-menu', self.__showmenu)
             column.connect('notify::width', self.__column_width_changed)
@@ -833,9 +930,7 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
             self.append_column(column)
 
         self.columns_autosize()
-        if old_sort:
-            header, order = old_sort
-            self.set_sort_by(None, header, order, False)
+        self.set_sort_orders(old_sort)
 
         self.handler_unblock(self.__csig)
 
@@ -853,7 +948,7 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         current = zip(map(tag_title, current), current)
 
         def add_header_toggle(menu, (header, tag), active, column=column):
-            item = Gtk.CheckMenuItem(header)
+            item = Gtk.CheckMenuItem(label=header)
             item.tag = tag
             item.set_active(active)
             item.connect('activate', self.__toggle_header_item, column)
@@ -892,7 +987,7 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
             (_("_File Headers"), fileinfo),
             (_("_Production Headers"), copyinfo),
         ]:
-            item = Gtk.MenuItem(name, use_underline=True)
+            item = Gtk.MenuItem(label=name, use_underline=True)
             item.show()
             menu.append(item)
             submenu = Gtk.Menu()
@@ -904,12 +999,8 @@ class SongList(AllTreeView, SongListDnDMixin, DragScroll,
         sep.show()
         menu.append(sep)
 
-        b = Gtk.MenuItem(_("Custom _Sort..."), use_underline=True)
-        menu.append(b)
-        b.show()
-        b.connect('activate', self.__custom_sort)
-
-        custom = Gtk.MenuItem(_("_Customize Headers..."), use_underline=True)
+        custom = Gtk.MenuItem(
+            label=_("_Customize Headers..."), use_underline=True)
         custom.show()
         custom.connect('activate', self.__add_custom_column)
         menu.append(custom)

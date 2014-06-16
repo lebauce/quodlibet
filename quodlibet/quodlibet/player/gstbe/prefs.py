@@ -20,8 +20,10 @@ class GstPlayerPreferences(Gtk.VBox):
 
         e = UndoEntry()
         e.set_tooltip_text(_("The GStreamer output pipeline used for "
-                "playback, such as 'alsasink device=default'. "
-                "Leave blank for default pipeline."))
+                "playback. Leave blank for the default pipeline. "
+                "In case the pipeline contains a sink, "
+                "it will be used instead of the default one."))
+
         e.set_text(config.get('player', 'gst_pipeline'))
 
         def changed(entry):
@@ -42,7 +44,8 @@ class GstPlayerPreferences(Gtk.VBox):
             player._set_buffer_duration(duration_msec)
 
         duration = config.getfloat("player", "gst_buffer")
-        scale = Gtk.HScale.new(Gtk.Adjustment(duration, 0.2, 10))
+        scale = Gtk.HScale.new(
+            Gtk.Adjustment(value=duration, lower=0.2, upper=10))
         scale.set_value_pos(Gtk.PositionType.RIGHT)
         scale.set_show_fill_level(True)
         scale.connect('format-value', format_buffer)
@@ -68,7 +71,7 @@ class GstPlayerPreferences(Gtk.VBox):
                    (buffer_label, scale, None),
         ]
 
-        table = Gtk.Table(len(widgets), 3)
+        table = Gtk.Table(n_rows=len(widgets), n_columns=3)
         table.set_col_spacings(6)
         table.set_row_spacings(6)
         for i, (left, middle, right) in enumerate(widgets):

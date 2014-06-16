@@ -14,10 +14,12 @@ from tests import TestCase, skipUnless
 try:
     from quodlibet.player.gstbe.util import GStreamerSink as Sink
     from quodlibet.player.gstbe.util import parse_gstreamer_taglist
+    from quodlibet.player.gstbe.util import find_audio_sink
     from quodlibet.player.gstbe.prefs import GstPlayerPreferences
 except ImportError:
     pass
 
+from quodlibet.player import PlayerError
 from quodlibet.util import sanitize_tags
 from quodlibet import config
 
@@ -53,18 +55,17 @@ class TGStreamerSink(TestCase):
             self.failUnless(obj)
             self.failUnlessEqual(name, n)
 
-    def test_fallback(self):
-        import __builtin__
-        pw = print_w
-        __builtin__.__dict__["print_w"] = lambda *x: None
+    def test_invalid(self):
         with ignore_gst_errors():
-            obj, name = Sink("notarealsink")
-        __builtin__.__dict__["print_w"] = pw
+            self.assertRaises(PlayerError, Sink, "notarealsink")
+
+    def test_fallback(self):
+        obj, name = Sink("")
         self.failUnless(obj)
         if os.name == "nt":
             self.failUnlessEqual(name, "directsoundsink")
         else:
-            self.failUnlessEqual(name, "autoaudiosink")
+            self.failUnlessEqual(name, find_audio_sink()[1])
 
     def test_append_sink(self):
         obj, name = Sink("volume")

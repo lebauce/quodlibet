@@ -23,6 +23,7 @@ import warnings
 import quodlibet.const
 import quodlibet.util
 
+from quodlibet.util import load_library
 from quodlibet.util.path import mkdir, unexpand
 from quodlibet.util.i18n import GlibTranslations
 from quodlibet.util.dprint import print_, print_d, print_w, print_e
@@ -141,6 +142,22 @@ def _gtk_init(icon=None):
         print_e("PyGObject is missing cairo support")
         exit(1)
 
+    # CSS overrides
+    style_provider = Gtk.CssProvider()
+    style_provider.load_from_data("""
+        /* Make GtkPaned look like in <=3.12, we depend on the spacing */
+        GtkPaned {
+            -GtkPaned-handle-size: 6;
+            background-image: none;
+            margin: 0;
+        }
+    """)
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(),
+        style_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
     # https://bugzilla.gnome.org/show_bug.cgi?id=708676
     warnings.filterwarnings('ignore', '.*g_value_get_int.*', Warning)
 
@@ -249,11 +266,10 @@ def set_process_title(title):
         return
 
     try:
-        import ctypes
-        libc = ctypes.CDLL('libc.so.6')
+        libc = load_library(["libc.so.6", "c"])[0]
         # 15 = PR_SET_NAME, apparently
         libc.prctl(15, title, 0, 0, 0)
-    except:
+    except (OSError, AttributeError):
         print_d("Couldn't find module libc.so.6 (ctypes). "
                 "Not setting process title.")
 
@@ -340,7 +356,7 @@ def init_plugins(no_plugins=False):
     print_d("Starting plugin manager")
 
     from quodlibet import plugins
-    folders = [os.path.join(quodlibet.const.BASEDIR, "plugins", kind)
+    folders = [os.path.join(quodlibet.const.BASEDIR, "ext", kind)
                for kind in PLUGIN_DIRS]
     folders.append(os.path.join(quodlibet.const.USERDIR, "plugins"))
     print_d("Scanning folders: %s" % folders)
@@ -439,30 +455,33 @@ def _init_debug():
         faulthandler.enable()
 
 
-def _init_signal():
-    """Catches certain signals and quits the application once the
-    mainloop has started."""
+def _init_signal(signal_action):
+    """Catches signals which should exit the program and calls `signal_action`
+    after the main loop has started, even if the signal occurred before the
+    main loop has started.
+    """
 
     import os
 
     if os.name == "nt":
         return
 
-    def signal_action():
-        app.quit()
-
     import signal
     import gi
     gi.require_version("GLib", "2.0")
     from gi.repository import GLib
 
-    SIGS = [getattr(signal, s, None) for s in "SIGINT SIGTERM SIGHUP".split()]
-    for sig in filter(None, SIGS):
+    for sig_name in ["SIGINT", "SIGTERM", "SIGHUP"]:
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+
         # Before the mainloop starts we catch signals in python
         # directly and idle_add the app.quit
         def idle_handler(*args):
             print_d("Python signal handler activated.")
             GLib.idle_add(signal_action, priority=GLib.PRIORITY_HIGH)
+
         print_d("Register Python signal handler: %r" % sig)
         signal.signal(sig, idle_handler)
 
@@ -474,8 +493,9 @@ def _init_signal():
             def handler(*args):
                 print_d("GLib signal handler activated.")
                 signal_action()
-            unix_signal_add = None
 
+            # older pygobject
+            unix_signal_add = None
             if hasattr(GLib, "unix_signal_add"):
                 unix_signal_add = GLib.unix_signal_add
             elif hasattr(GLib, "unix_signal_add_full"):
@@ -486,6 +506,7 @@ def _init_signal():
                 unix_signal_add(GLib.PRIORITY_HIGH, sig, handler, None)
             else:
                 print_d("Can't install GLib signal handler, too old gi.")
+
         GLib.idle_add(install_glib_handler, sig, priority=GLib.PRIORITY_HIGH)
 
 # minimal emulation of gtk.quit_add

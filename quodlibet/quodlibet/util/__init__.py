@@ -9,6 +9,8 @@
 import os
 import random
 import re
+import ctypes
+import ctypes.util
 import sys
 import traceback
 import urlparse
@@ -489,19 +491,30 @@ class DeferredSignal(object):
     priority and prevents multiple calls from being inserted in the
     mainloop at a time, greatly improving responsiveness in some places.
 
+    When the target function will finally be called the arguments passed
+    are the last arguments passed to DeferredSignal.
+
+    If `owner` is given, it will not call the target after the owner is
+    destroyed.
+
     Example usage:
 
     def func(widget, user_arg):
         pass
-    widget.connect('signal', DeferredSignal(func), user_arg)
+    widget.connect('signal', DeferredSignal(func, owner=widget), user_arg)
     """
 
-    def __init__(self, func, timeout=None):
+    def __init__(self, func, timeout=None, owner=None):
         """timeout in milliseconds"""
 
         self.func = func
         self.dirty = False
         self.args = None
+
+        if owner:
+            def destroy_cb(owner):
+                self.abort()
+            owner.connect("destroy", destroy_cb)
 
         from gi.repository import GLib
         if timeout is None:
@@ -509,8 +522,11 @@ class DeferredSignal(object):
         else:
             self.do_idle_add = lambda f: GLib.timeout_add(timeout, f)
 
-    def destroy(self):
-        """Abort any queued up up signal calls"""
+    def abort(self):
+        """Abort any queued up calls.
+
+        Can still be reused afterwards.
+        """
 
         if self.dirty:
             from gi.repository import GLib
@@ -528,6 +544,7 @@ class DeferredSignal(object):
         self.func(*self.args)
         self.dirty = False
         self.args = None
+        return False
 
 
 def gobject_weak(fun, *args, **kwargs):
@@ -759,3 +776,36 @@ def atomic_save(filename, suffix, mode):
         if fcntl is not None:
             fcntl.flock(fileobj.fileno(), fcntl.LOCK_UN)
         fileobj.close()
+
+
+def load_library(names, shared=True):
+    """Load a ctypes library with a range of names to try.
+
+    Handles direct .so names and library names ["libgpod.so", "gpod"].
+
+    If shared is True can return a shared instance.
+    Raises OSError if not found.
+
+    Returns (library, name)
+    """
+
+    if not names:
+        raise ValueError
+
+    if shared:
+        load_func = lambda n: getattr(ctypes.cdll, n)
+    else:
+        load_func = ctypes.cdll.LoadLibrary
+
+    errors = []
+    for name in names:
+        dlopen_name = name
+        if ".so" not in name and ".dll" not in name:
+            dlopen_name = ctypes.util.find_library(name) or name
+
+        try:
+            return load_func(dlopen_name), name
+        except OSError as e:
+            errors.append(str(e))
+
+    raise OSError("\n".join(errors))

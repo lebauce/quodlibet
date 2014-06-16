@@ -59,9 +59,12 @@ class SeekBar(HSlider):
         hbox = Gtk.HBox(spacing=3)
         l = TimeLabel()
         hbox.pack_start(l, True, True, 0)
-        arrow = Gtk.Arrow(Gtk.ArrowType.RIGHT, Gtk.ShadowType.NONE)
+        arrow = Gtk.Arrow.new(Gtk.ArrowType.RIGHT, Gtk.ShadowType.NONE)
         hbox.pack_start(arrow, False, True, 0)
         super(SeekBar, self).__init__(hbox)
+
+        self._slider_label = TimeLabel()
+        self.set_slider_widget(self._slider_label)
 
         self.scale.connect('button-press-event', self.__seek_lock)
         self.scale.connect('button-release-event', self.__seek_unlock, player)
@@ -168,19 +171,29 @@ class SeekBar(HSlider):
 
     def __update_time(self, scale, timer):
         value = scale.get_value()
-        max = scale.get_adjustment().get_upper()
-        value -= self.__remaining.get_active() * max
+        max_ = scale.get_adjustment().get_upper()
+        remaining = value - max_
+        if self.__remaining.get_active():
+            remaining, value = value, remaining
         timer.set_time(value)
+        self._slider_label.set_time(remaining)
 
     def __song_changed(self, player, song, label, menu):
-        if song and song.get("~#length", 0) > 0:
-            self.scale.set_range(0, song["~#length"])
-            self.scale.set_value(0)
+
+        if song and song("~#length") > 0:
+            self.scale.set_range(0, song("~#length"))
+            slider_width = song("~#length")
             self.__seekable = True
         else:
             self.scale.set_range(0, 1)
-            self.scale.set_value(0)
+            slider_width = 0
             self.__seekable = False
+
+        self.scale.set_value(0)
+
+        slider_width = min(max(slider_width, 170), 400)
+        self.set_slider_length(slider_width)
+
         for child in menu.get_children()[2:-1]:
             menu.remove(child)
             child.destroy()
@@ -193,7 +206,7 @@ class Volume(Gtk.VolumeButton):
         super(Volume, self).__init__(size=Gtk.IconSize.MENU, use_symbolic=True)
 
         self.set_relief(Gtk.ReliefStyle.NORMAL)
-        self.set_adjustment(Gtk.Adjustment(0, 0, 1, 0.05, 0.1, 0))
+        self.set_adjustment(Gtk.Adjustment.new(0, 0, 1, 0.05, 0.1, 0))
 
         self.connect('value-changed', self.__volume_changed, device)
         device.connect('notify::volume', self.__volume_notify)
@@ -266,33 +279,35 @@ class PlayControls(Gtk.VBox):
     def __init__(self, player, library):
         super(PlayControls, self).__init__(spacing=3)
 
-        upper = Gtk.Table(rows=1, columns=3, homogeneous=True)
+        upper = Gtk.Table(n_rows=1, n_columns=3, homogeneous=True)
         upper.set_row_spacings(3)
         upper.set_col_spacings(3)
 
-        prev = Gtk.Button()
+        prev = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         prev.add(SymbolicIconImage("media-skip-backward",
                                    Gtk.IconSize.LARGE_TOOLBAR))
         upper.attach(prev, 0, 1, 0, 1)
 
-        play = Gtk.ToggleButton()
+        play = Gtk.ToggleButton(relief=Gtk.ReliefStyle.NONE)
         play.add(SymbolicIconImage("media-playback-start",
                                    Gtk.IconSize.LARGE_TOOLBAR))
         upper.attach(play, 1, 2, 0, 1)
 
-        next_ = Gtk.Button()
+        next_ = Gtk.Button(relief=Gtk.ReliefStyle.NONE)
         next_.add(SymbolicIconImage("media-skip-forward",
                                     Gtk.IconSize.LARGE_TOOLBAR))
         upper.attach(next_, 2, 3, 0, 1)
 
-        lower = Gtk.Table(rows=1, columns=3, homogeneous=True)
+        lower = Gtk.Table(n_rows=1, n_columns=3, homogeneous=True)
         lower.set_row_spacings(3)
         lower.set_col_spacings(3)
 
         self.volume = Volume(player)
+        self.volume.set_relief(Gtk.ReliefStyle.NONE)
         lower.attach(self.volume, 0, 1, 0, 1)
 
         seekbar = SeekBar(player, library)
+        seekbar.set_relief(Gtk.ReliefStyle.NONE)
         lower.attach(seekbar, 1, 3, 0, 1)
 
         self.pack_start(upper, False, True, 0)

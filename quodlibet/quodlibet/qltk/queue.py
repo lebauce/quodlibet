@@ -7,7 +7,7 @@
 
 import os
 
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, Gio
 
 from quodlibet import config
 from quodlibet import const
@@ -18,9 +18,40 @@ from quodlibet.qltk.ccb import ConfigCheckButton
 from quodlibet.qltk.songlist import SongList, DND_QL, DND_URI_LIST
 from quodlibet.qltk.songsmenu import SongsMenu
 from quodlibet.qltk.playorder import OrderInOrder, OrderShuffle
-from quodlibet.qltk.x import ScrolledWindow
+from quodlibet.qltk.x import ScrolledWindow, SymbolicIconImage, \
+    SmallImageButton
 
 QUEUE = os.path.join(const.USERDIR, "queue")
+
+
+class PlaybackStatusIcon(Gtk.Box):
+    """A widget showing a play/pause/stop symbolic icon"""
+
+    def __init__(self):
+        super(PlaybackStatusIcon, self).__init__()
+        self._icons = {}
+
+    def _set(self, name):
+        if name not in self._icons:
+            image = SymbolicIconImage(name, Gtk.IconSize.MENU)
+            self._icons[name] = image
+            image.show()
+        else:
+            image = self._icons[name]
+
+        children = self.get_children()
+        if children:
+            self.remove(children[0])
+        self.add(image)
+
+    def play(self):
+        self._set("media-playback-start")
+
+    def stop(self):
+        self._set("media-playback-stop")
+
+    def pause(self):
+        self._set("media-playback-pause")
 
 
 class QueueExpander(Gtk.Expander):
@@ -31,37 +62,49 @@ class QueueExpander(Gtk.Expander):
         sw.set_shadow_type(Gtk.ShadowType.IN)
         self.queue = PlayQueue(library, player)
         sw.add(self.queue)
-        hb = Gtk.HBox(spacing=12)
+
+        outer = Gtk.HBox(spacing=12)
+
+        left = Gtk.HBox(spacing=12)
 
         hb2 = Gtk.HBox(spacing=3)
-        state = Gtk.Image.new_from_stock(
-            Gtk.STOCK_MEDIA_STOP, Gtk.IconSize.MENU)
-        hb2.pack_start(state, True, True, 0)
+        state_icon = PlaybackStatusIcon()
+        state_icon.stop()
+        state_icon.show()
+        hb2.pack_start(state_icon, True, True, 0)
+        name_label = Gtk.Label(label=_("_Queue"), use_underline=True)
+        hb2.pack_start(name_label, True, True, 0)
+        left.pack_start(hb2, False, True, 0)
 
-        l = Gtk.Label(label=_("_Queue"))
-        hb2.pack_start(l, True, True, 0)
-        hb.pack_start(hb2, True, True, 0)
-        l.set_use_underline(True)
-
-        clear = Gtk.Image.new_from_stock(Gtk.STOCK_CLEAR, Gtk.IconSize.MENU)
-        b = Gtk.Button()
-        b.add(clear)
+        b = SmallImageButton(
+            image=Gtk.Image.new_from_stock(Gtk.STOCK_CLEAR, Gtk.IconSize.MENU))
         b.set_tooltip_text(_("Remove all songs from the queue"))
         b.connect('clicked', self.__clear_queue)
         b.hide()
         b.set_relief(Gtk.ReliefStyle.NONE)
-        hb.pack_start(b, False, False, 0)
+        left.pack_start(b, False, False, 0)
 
-        l2 = Gtk.Label()
-        hb.pack_start(l2, True, True, 0)
+        count_label = Gtk.Label()
+        left.pack_start(count_label, False, True, 0)
+
+        outer.pack_start(left, True, True, 0)
+
+        close_button = SmallImageButton(
+            image=SymbolicIconImage("window-close", Gtk.IconSize.MENU),
+            relief=Gtk.ReliefStyle.NONE)
+
+        close_button.connect("clicked", lambda *x: self.hide())
+
+        outer.pack_start(close_button, False, False, 6)
+        self.set_label_fill(True)
 
         cb = ConfigCheckButton(
             _("_Random"), "memory", "shufflequeue")
         cb.connect('toggled', self.__queue_shuffle, self.queue.model)
         cb.set_active(config.getboolean("memory", "shufflequeue"))
-        hb.pack_start(cb, True, True, 0)
+        left.pack_start(cb, False, True, 0)
 
-        self.set_label_widget(hb)
+        self.set_label_widget(outer)
         self.add(sw)
         self.connect_object('notify::expanded', self.__expand, cb, b)
 
@@ -75,23 +118,22 @@ class QueueExpander(Gtk.Expander):
         self.connect('drag-motion', self.__motion)
         self.connect('drag-data-received', self.__drag_data_received)
 
-        self.model = self.queue.model
         self.show_all()
 
         self.queue.model.connect_after('row-inserted',
-            util.DeferredSignal(self.__check_expand), l2)
+            util.DeferredSignal(self.__check_expand), count_label)
         self.queue.model.connect_after('row-deleted',
-            util.DeferredSignal(self.__update_count), l2)
+            util.DeferredSignal(self.__update_count), count_label)
         cb.hide()
 
         self.connect_object('notify::visible', self.__visible, cb, menu, b)
-        self.__update_count(self.model, None, l2)
+        self.__update_count(self.model, None, count_label)
 
-        player.connect('song-started', self.__update_state_icon, state)
+        player.connect('song-started', self.__update_state_icon, state_icon)
         player.connect('paused', self.__update_state_icon_pause,
-                        state, Gtk.STOCK_MEDIA_PAUSE)
+                        state_icon, True)
         player.connect('unpaused', self.__update_state_icon_pause,
-                        state, Gtk.STOCK_MEDIA_PLAY)
+                        state_icon, False)
 
         # to make the children clickable if mapped
         # ....no idea why, but works
@@ -102,16 +144,24 @@ class QueueExpander(Gtk.Expander):
                 label.map()
         self.connect("map", hack)
 
-    def __update_state_icon(self, player, song, state):
-        if self.model.sourced:
-            icon = Gtk.STOCK_MEDIA_PLAY
-        else:
-            icon = Gtk.STOCK_MEDIA_STOP
-        state.set_from_stock(icon, Gtk.IconSize.MENU)
+    @property
+    def model(self):
+        return self.queue.model
 
-    def __update_state_icon_pause(self, player, state, icon):
+    def __update_state_icon(self, player, song, state_icon):
         if self.model.sourced:
-            state.set_from_stock(icon, Gtk.IconSize.MENU)
+            state_icon.play()
+        else:
+            state_icon.stop()
+
+    def __update_state_icon_pause(self, player, state_icon, paused):
+        if self.model.sourced:
+            if paused:
+                state_icon.pause()
+            else:
+                state_icon.play()
+        else:
+            state_icon.stop()
 
     def __clear_queue(self, activator):
         self.model.clear()
@@ -161,6 +211,8 @@ class QueueExpander(Gtk.Expander):
 
 class PlayQueue(SongList):
 
+    sortable = False
+
     class CurrentColumn(Gtk.TreeViewColumn):
         # Match MainSongList column sizes by default.
         header_name = "~current"
@@ -173,7 +225,6 @@ class PlayQueue(SongList):
     def __init__(self, library, player):
         super(PlayQueue, self).__init__(library, player)
         self.set_size_request(-1, 120)
-        self.model = self.get_model()
         self.connect('row-activated', self.__go_to, player)
 
         self.connect_object('popup-menu', self.__popup, library)
@@ -230,9 +281,3 @@ class PlayQueue(SongList):
 
     def __remove(self, *args):
         self.remove_selection()
-
-    def set_sort_by(self, *args):
-        pass
-
-    def get_sort_by(self, *args):
-        return "", False

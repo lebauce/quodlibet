@@ -164,7 +164,7 @@ class Notebook(Gtk.Notebook):
                 raise TypeError("no page.title and no label given")
 
         if not isinstance(label, Gtk.Widget):
-            label = Gtk.Label(label)
+            label = Gtk.Label(label=label)
         super(Notebook, self).append_page(page, label)
 
 
@@ -308,6 +308,26 @@ class ConfigRHPaned(ConfigRPaned):
 
 class ConfigRVPaned(ConfigRPaned):
     ORIENTATION = Gtk.Orientation.VERTICAL
+
+
+class SmallImageButton(Gtk.Button):
+    """A button for images with less padding"""
+
+    def __init__(self, **kwargs):
+        super(SmallImageButton, self).__init__(**kwargs)
+
+        self.set_size_request(26, 26)
+        style_provider = Gtk.CssProvider()
+        style_provider.load_from_data("""
+            * {
+                padding: 0px;
+            }
+        """)
+        style_context = self.get_style_context()
+        style_context.add_provider(
+            style_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
 
 def ClearButton(entry=None):

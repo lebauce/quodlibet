@@ -5,6 +5,7 @@
 # published by the Free Software Foundation
 
 from quodlibet.player._base import BasePlayer
+from quodlibet.player import PlayerError
 from quodlibet.qltk.songlist import PlaylistModel
 
 
@@ -45,10 +46,9 @@ class NullPlayer(BasePlayer):
         else:
             raise AttributeError
 
-    def error(self, message):
-        self.emit('error', self.song, message)
-        if not self.paused:
-            self.next()
+    def _error(self, message):
+        self.paused = True
+        self.emit('error', self.song, PlayerError(message))
 
     def seek(self, pos):
         """Seek to a position in the song, in milliseconds."""

@@ -49,7 +49,7 @@ class TrackNumbers(Gtk.VBox):
         hbox2.pack_start(preview, False, True, 0)
 
         model = Gtk.ListStore(object, str, str)
-        view = HintedTreeView(model)
+        view = HintedTreeView(model=model)
 
         self.pack_start(hbox2, False, True, 0)
 
@@ -70,7 +70,7 @@ class TrackNumbers(Gtk.VBox):
         self.pack_start(w, True, True, 0)
 
         bbox = Gtk.HButtonBox()
-        bbox.set_spacing(12)
+        bbox.set_spacing(6)
         bbox.set_layout(Gtk.ButtonBoxStyle.END)
         save = Gtk.Button(stock=Gtk.STOCK_SAVE)
         save.connect_object(
