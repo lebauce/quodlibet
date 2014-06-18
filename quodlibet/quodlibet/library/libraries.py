@@ -808,33 +808,70 @@ class WatchedFileLibrary(FileLibrary):
             f = Gio.File.parse_name(normalised)
             print_d("Monitoring directory %s" % (normalised,))
             monitor = f.monitor_directory(Gio.FileMonitorFlags.NONE, None)
-            monitor.connect("changed", self.__file_changed)
+            handler_id = monitor.connect("changed", self.__file_changed)
             # Don't destroy references - http://stackoverflow.com/q/4535227
-            self.__monitors[path] = monitor
+            self.__monitors[path] = (monitor, handler_id)
 
     def __file_changed(self, monitor, main_file, other_file, event):
         file_path = normalize_path(main_file.get_path(), True)
-        if os.path.isdir(file_path):
-            print_d("Ignoring event on directory %s" % file_path)
-            return
-        if event == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
-            # TODO: should we wait till changes are finished?
-            # Doesn't seem to have much value
-            pass
-        elif event == Gio.FileMonitorEvent.CHANGED:
-            print_d("Changes to %s" % file_path)
-        elif event == Gio.FileMonitorEvent.CREATED:
+        if event == Gio.FileMonitorEvent.CREATED:
+            if os.path.isdir(file_path):
+                self.monitor_dir(file_path)
+                for _ in self.scan([file_path]):
+                    # Just consume.
+                    pass
+                return
             print_d("Auto-adding new file: %s" % file_path)
             self.add_filename(file_path)
         elif event == Gio.FileMonitorEvent.DELETED:
-            print_d("Auto-removing: %s" % file_path)
-            song = self.get(file_path, None)
+            song = self.get(file_path)
             if song:
+                print_d("Auto-removing song: %s" % file_path)
                 self.reload(song)
             else:
-                print_w("Couldn't find %s in library to remove" % file_path)
+                from quodlibet.formats import filter as format_supported
+                if format_supported(file_path):
+                    print_w("Couldn't find %s in library to remove"
+                            % file_path)
+                else:
+                    # It was probably a directory...
+                    self.unmonitor_dir(file_path)
+                    # Make sure they are in this sub-dir, not similar files
+                    path_fragment = (file_path if file_path.endswith(os.sep)
+                                     else file_path + os.sep)
+
+                    # And try to remove all songs under that dir. Slowly.
+                    gone = []
+                    print_d("Removing any songs in %s" % file_path)
+                    for key, song in self._contents.iteritems():
+                        if key.startswith(path_fragment):
+                            gone.append(song)
+                    self.remove(gone)
+        elif event == Gio.FileMonitorEvent.CHANGED:
+            song = self.get(file_path)
+            if song:
+                print_d("Updating externally changed song: %s" % file_path)
+                self.reload(song)
+        elif event == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
+            # TODO: should we wait till changes are finished?
+            # Doesn't seem to have much value
+            pass
+        elif event == Gio.FileMonitorEvent.ATTRIBUTE_CHANGED:
+            # Probably pointless for us.
+            pass
         else:
             print_d("Unhandled event %s on %s" % (event, file_path))
+
+    def unmonitor_dir(self, path):
+        """Disconnect and remove any monitor for a directory, if found"""
+        monitor, handler_id = self.__monitors.get(path, (None, None))
+        if not monitor:
+            print_d("Couldn't find path %s in active monitors: %s" %
+                    (path, self.__monitors.keys()))
+            return
+        print_d("Un-monitoring %s" % path)
+        monitor.disconnect(handler_id)
+        del self.__monitors[path]
 
     def _process_scanned_dirs(self, base, dirs):
         super(WatchedFileLibrary, self)._process_scanned_dirs(base, dirs)

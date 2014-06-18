@@ -579,7 +579,7 @@ def wait_for(func, *args, **kwargs):
     timeout = kwargs.get("timeout", 3)
     while not func(*args, **kwargs) and time.time() - t < timeout:
         Gtk.main_iteration_do(False)
-        
+
 
 class TSongFileLibrary(TSongLibrary):
     Fake = FakeSongFile
