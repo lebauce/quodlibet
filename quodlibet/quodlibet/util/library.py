@@ -66,8 +66,7 @@ def scan_library(library, force):
     """
 
     paths = get_scan_dirs()
-    exclude = split_scan_dirs(config.get("library", "exclude"))
-    exclude = [util.fsnative(e) for e in exclude]
+    exclude = get_excluded_scan_dirs()
     copool.add(library.rebuild, paths, force, exclude,
                cofuncid="library", funcid="library")
 
