@@ -18,18 +18,20 @@ import shutil
 import threading
 import time
 
-from gi.repository import GObject
+from gi.repository import GObject, Gio
 
 from quodlibet.formats import MusicFile
 from quodlibet.parse import Query
 from quodlibet.qltk.notif import Task
+from quodlibet import config
 from quodlibet.util.collection import Album
 from quodlibet.util.collections import DictMixin
 from quodlibet import util
 from quodlibet import const
 from quodlibet import formats
 from quodlibet.util.dprint import print_d, print_w
-from quodlibet.util.path import fsdecode, expanduser, unexpand, mkdir
+from quodlibet.util.path import fsdecode, expanduser, unexpand, mkdir, fsencode, \
+    normalize_path
 
 
 class Library(GObject.GObject, DictMixin):
@@ -335,7 +337,7 @@ class AlbumLibrary(Library):
         self._changed(set(items))
 
     def load(self):
-        # deprectated
+        # deprecated
         pass
 
     def destroy(self):
@@ -612,13 +614,13 @@ class FileLibrary(PicklingLibrary):
 
         This generator rebuilds the library over the course of iteration.
 
-        Any paths given will be scanned for new files, using the 'scan'
+        Any paths given will be scanned for new files, using the `scan`
         method.
 
         Only items present in the library when the rebuild is started
         will be checked.
 
-        If this function is copooled, set "cofuncid" to enable pause/stop
+        If this function is copooled, set `cofuncid` to enable pause/stop
         buttons in the UI.
         """
 
@@ -641,7 +643,7 @@ class FileLibrary(PicklingLibrary):
         for i, (key, item) in task.list(enumerate(sorted(self.items()))):
             if key in self._contents and force or not item.valid():
                 self.reload(item, changed, removed)
-                # These numbers are pretty empirical. We should yield more
+            # These numbers are pretty empirical. We should yield more
             # often than we emit signals; that way the main loop stays
             # interactive and doesn't get bogged down in updates.
             if len(changed) > 100:
@@ -697,6 +699,7 @@ class FileLibrary(PicklingLibrary):
                 if filter(fullpath.startswith, exclude):
                     continue
                 for path, dnames, fnames in os.walk(util.fsnative(fullpath)):
+                    self._process_scanned_dirs(path, dnames)
                     for filename in fnames:
                         fullfilename = os.path.join(path, filename)
                         if filter(fullfilename.startswith, exclude):
@@ -724,6 +727,11 @@ class FileLibrary(PicklingLibrary):
                     added = []
                     task.pulse()
                     yield True
+
+    def _process_scanned_dirs(self, path, dirs):
+        """Visitor for directories `dirs` in `path` that have just been
+        scanned"""
+        pass
 
     def get_content(self):
         """Return visible and masked items"""
@@ -785,7 +793,96 @@ class FileLibrary(PicklingLibrary):
         self._masked.pop(mount_point, {})
 
 
-class SongFileLibrary(SongLibrary, FileLibrary):
+class WatchedFileLibrary(FileLibrary):
+    """A File Library that sets up monitors on directories at refresh
+    and handles changes sensibly"""
+
+    def __init__(self, name=None):
+        super(WatchedFileLibrary, self).__init__(name)
+        self.__monitors = {}
+
+    def monitor_dir(self, path):
+        normalised = normalize_path(path, True)
+        # Only add one monitor per absolute path...
+        if normalised not in self.__monitors:
+            f = Gio.File.parse_name(normalised)
+            print_d("Monitoring directory %s" % (normalised,))
+            monitor = f.monitor_directory(Gio.FileMonitorFlags.NONE, None)
+            handler_id = monitor.connect("changed", self.__file_changed)
+            # Don't destroy references - http://stackoverflow.com/q/4535227
+            self.__monitors[path] = (monitor, handler_id)
+
+    def __file_changed(self, monitor, main_file, other_file, event):
+        file_path = normalize_path(main_file.get_path(), True)
+        if event == Gio.FileMonitorEvent.CREATED:
+            if os.path.isdir(file_path):
+                self.monitor_dir(file_path)
+                for _ in self.scan([file_path]):
+                    # Just consume.
+                    pass
+                return
+            print_d("Auto-adding new file: %s" % file_path)
+            self.add_filename(file_path)
+        elif event == Gio.FileMonitorEvent.DELETED:
+            song = self.get(file_path)
+            if song:
+                print_d("Auto-removing song: %s" % file_path)
+                self.reload(song)
+            else:
+                from quodlibet.formats import filter as format_supported
+                if format_supported(file_path):
+                    print_w("Couldn't find %s in library to remove"
+                            % file_path)
+                else:
+                    # It was probably a directory...
+                    self.unmonitor_dir(file_path)
+                    # Make sure they are in this sub-dir, not similar files
+                    path_fragment = (file_path if file_path.endswith(os.sep)
+                                     else file_path + os.sep)
+
+                    # And try to remove all songs under that dir. Slowly.
+                    gone = []
+                    print_d("Removing any songs in %s" % file_path)
+                    for key, song in self._contents.iteritems():
+                        if key.startswith(path_fragment):
+                            gone.append(song)
+                    self.remove(gone)
+        elif event == Gio.FileMonitorEvent.CHANGED:
+            song = self.get(file_path)
+            if song:
+                print_d("Updating externally changed song: %s" % file_path)
+                self.reload(song)
+        elif event == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
+            # TODO: should we wait till changes are finished?
+            # Doesn't seem to have much value
+            pass
+        elif event == Gio.FileMonitorEvent.ATTRIBUTE_CHANGED:
+            # Probably pointless for us.
+            pass
+        else:
+            print_d("Unhandled event %s on %s" % (event, file_path))
+
+    def unmonitor_dir(self, path):
+        """Disconnect and remove any monitor for a directory, if found"""
+        monitor, handler_id = self.__monitors.get(path, (None, None))
+        if not monitor:
+            print_d("Couldn't find path %s in active monitors: %s" %
+                    (path, self.__monitors.keys()))
+            return
+        print_d("Un-monitoring %s" % path)
+        monitor.disconnect(handler_id)
+        del self.__monitors[path]
+
+    def _process_scanned_dirs(self, base, dirs):
+        super(WatchedFileLibrary, self)._process_scanned_dirs(base, dirs)
+        # Shortcut out of iteration
+        if not config.getboolean("library", "auto_update"):
+            return
+        for d in dirs:
+            self.monitor_dir(os.path.join(base, d))
+
+
+class SongFileLibrary(SongLibrary, WatchedFileLibrary):
     """A library containing song files.
     Pickles contents to disk as `FileLibrary`"""
 
