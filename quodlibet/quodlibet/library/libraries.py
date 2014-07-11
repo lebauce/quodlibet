@@ -1,5 +1,5 @@
 # Copyright 2006 Joe Wreschnig
-#           2013 Nick Boultbee
+#           2013,2014 Nick Boultbee
 #           2013,2014 Christoph Reiter
 #
 # This program is free software; you can redistribute it and/or modify
@@ -24,13 +24,15 @@ from quodlibet.formats import MusicFile
 from quodlibet.parse import Query
 from quodlibet.qltk.notif import Task
 from quodlibet import config
+from quodlibet.util import copool
+from quodlibet.util.library import get_scan_dirs, get_excluded_scan_dirs
 from quodlibet.util.collection import Album
 from quodlibet.util.collections import DictMixin
 from quodlibet import util
 from quodlibet import const
 from quodlibet import formats
 from quodlibet.util.dprint import print_d, print_w
-from quodlibet.util.path import fsdecode, expanduser, unexpand, mkdir, fsencode, \
+from quodlibet.util.path import fsdecode, expanduser, unexpand, mkdir, \
     normalize_path
 
 
@@ -733,6 +735,17 @@ class FileLibrary(PicklingLibrary):
         scanned"""
         pass
 
+    def start_watching(self):
+        """Subclasses should implement this to set up watches on their
+        content"""
+        print_w("File watching not configured.")
+        pass
+
+    def stop_watching(self):
+        """Subclasses should implement this to destroy watches"""
+        print_w("File watching not configured.")
+        pass
+
     def get_content(self):
         """Return visible and masked items"""
 
@@ -802,11 +815,11 @@ class WatchedFileLibrary(FileLibrary):
         self.__monitors = {}
 
     def monitor_dir(self, path):
+        """Monitors a single directory"""
         normalised = normalize_path(path, True)
         # Only add one monitor per absolute path...
         if normalised not in self.__monitors:
             f = Gio.File.parse_name(normalised)
-            print_d("Monitoring directory %s" % (normalised,))
             monitor = f.monitor_directory(Gio.FileMonitorFlags.NONE, None)
             handler_id = monitor.connect("changed", self.__file_changed)
             # Don't destroy references - http://stackoverflow.com/q/4535227
@@ -816,6 +829,7 @@ class WatchedFileLibrary(FileLibrary):
         file_path = normalize_path(main_file.get_path(), True)
         if event == Gio.FileMonitorEvent.CREATED:
             if os.path.isdir(file_path):
+                print_d("Monitoring new directory %s" % (file_path,))
                 self.monitor_dir(file_path)
                 for _ in self.scan([file_path]):
                     # Just consume.
@@ -880,6 +894,42 @@ class WatchedFileLibrary(FileLibrary):
             return
         for d in dirs:
             self.monitor_dir(os.path.join(base, d))
+
+    def start_watching(self):
+        paths = get_scan_dirs()
+        print_d("Setting up file watches for %s on %s..."
+                % (type(self), paths))
+        exclude = [expanduser(util.fsnative(e))
+                   for e in get_excluded_scan_dirs() if e]
+
+        def watching_producer():
+            # TODO: integrate this better with scanning.
+            for fullpath in paths:
+                desc = _("Adding watches for %s") % (
+                    unexpand(fsdecode(fullpath)))
+                with Task(_("Library"), desc) as task:
+                    fullpath = expanduser(fullpath)
+                    if filter(fullpath.startswith, exclude):
+                        continue
+                    unpulsed = 0
+                    for path, dirs, files in os.walk(util.fsnative(fullpath)):
+                        for d in dirs:
+                            self.monitor_dir(os.path.join(path, d))
+                        unpulsed += len(dirs)
+                        if unpulsed > 50:
+                            task.pulse()
+                            unpulsed = 0
+                        yield
+
+        copool.add(watching_producer, funcid="watch_library")
+
+    def stop_watching(self):
+        for path in self.__monitors.keys():
+            self.unmonitor_dir(path)
+
+    def destroy(self):
+        self.stop_watching()
+        super(WatchedFileLibrary, self).destroy()
 
 
 class SongFileLibrary(SongLibrary, WatchedFileLibrary):

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2004-2013 Joe Wreschnig, Michael Urman, Iñigo Serna,
+# Copyright 2004-2014 Joe Wreschnig, Michael Urman, Iñigo Serna,
 #     Christoph Reiter, Nick Boultbee
 #
 # This program is free software; you can redistribute it and/or modify
@@ -43,6 +43,11 @@ def split_scan_dirs(s):
 
 def get_scan_dirs():
     dirs = split_scan_dirs(config.get("settings", "scan"))
+    return [util.fsnative(d) for d in dirs if d]
+
+
+def get_excluded_scan_dirs():
+    dirs = split_scan_dirs(config.get("library", "exclude"))
     return [util.fsnative(d) for d in dirs if d]
 
 
