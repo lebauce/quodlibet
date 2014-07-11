@@ -513,8 +513,12 @@ class QuodLibetWindow(Gtk.Window, PersistentWindowMixin):
         if not headless:
             GLib.idle_add(self.__configure_scan_dirs, library)
 
+        print_d("Checking library startup configuration...")
         if config.getboolean('library', 'refresh_on_start'):
+            # Calls library's scan, which will set up watching if required
             self.__rebuild(None, False)
+        elif config.getboolean('library', 'auto_update'):
+            self.__library.start_watching()
 
         self.connect_object("key-press-event", self.__key_pressed, player)
 

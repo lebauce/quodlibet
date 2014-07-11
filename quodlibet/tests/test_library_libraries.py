@@ -193,6 +193,7 @@ class FakeAudioFileResource(AudioFile):
             raise e
         print_d("Removed %s" % self.fn)
 
+
 # Custom range functions, to generate lists of song-like objects
 def FSFrange(*args):
     return map(FakeSongFile, range(*args))
@@ -564,7 +565,7 @@ class TWatchedFileLibrary(TFileLibrary):
             wait_for(lambda lib: len(lib) == 0, self.library)
             self.failIf(self.library,
                         msg="%s didn't get auto-removed" % song.fn)
-        except Exception as e:
+        except Exception:
             raise
         finally:
             if self.root:
