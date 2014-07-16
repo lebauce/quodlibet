@@ -930,6 +930,7 @@ class WatchedFileLibrary(FileLibrary):
                     if filter(fullpath.startswith, exclude):
                         continue
                     unpulsed = 0
+                    self.monitor_dir(fullpath)
                     for path, dirs, files in os.walk(fullpath):
                         for d in dirs:
                             self.monitor_dir(os.path.join(path, d))
