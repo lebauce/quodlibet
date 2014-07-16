@@ -853,24 +853,20 @@ class WatchedFileLibrary(FileLibrary):
                 print_d("Auto-removing song: %s" % file_path)
                 self.reload(song)
             else:
-                from quodlibet.formats import filter as format_supported
-                if format_supported(file_path):
-                    print_w("Couldn't find %s in library to remove"
-                            % file_path)
-                else:
-                    # It was probably a directory...
-                    self.unmonitor_dir(file_path)
-                    # Make sure they are in this sub-dir, not similar files
-                    path_fragment = (file_path if file_path.endswith(os.sep)
-                                     else file_path + os.sep)
+                # either not a song, or a song that was renamed by QL
 
-                    # And try to remove all songs under that dir. Slowly.
-                    gone = []
-                    print_d("Removing any songs in %s" % file_path)
-                    for key, song in self._contents.iteritems():
-                        if key.startswith(path_fragment):
-                            gone.append(song)
-                    self.remove(gone)
+                self.unmonitor_dir(file_path)
+                # Make sure they are in this sub-dir, not similar files
+                path_fragment = (file_path if file_path.endswith(os.sep)
+                                 else file_path + os.sep)
+
+                # And try to remove all songs under that dir. Slowly.
+                gone = []
+                print_d("Removing any songs in %s" % file_path)
+                for key, song in self.iteritems():
+                    if key.startswith(path_fragment):
+                        gone.append(song)
+                self.remove(gone)
         elif event == Gio.FileMonitorEvent.CHANGED:
             song = self.get(file_path)
             if song:
