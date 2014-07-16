@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Copyright 2004-2009 Joe Wreschnig, Michael Urman, Iñigo Serna,
 #                     Steven Robertson
-#           2011-2013 Nick Boultbee
+#           2011-2014 Nick Boultbee
 #           2013 Christoph Reiter
 #
 # This program is free software; you can redistribute it and/or modify
@@ -25,7 +25,6 @@ from quodlibet.qltk.scanbox import ScanBox
 from quodlibet.qltk.maskedbox import MaskedBox
 from quodlibet.qltk.songlist import SongList
 from quodlibet.util import copool
-from quodlibet.util.path import fsnative
 from quodlibet.util.dprint import print_d
 from quodlibet.util.library import emit_signal, get_scan_dirs, scan_library
 
@@ -590,8 +589,6 @@ class PreferencesWindow(qltk.UniqueWindow):
             self.set_border_width(12)
             self.title = _("Library")
 
-            cb = CCB(_("_Refresh library on start"),
-                     "library", "refresh_on_start", populate=True)
             scan_dirs = ScanBox()
 
             vb3 = Gtk.VBox(spacing=6)
@@ -613,10 +610,20 @@ class PreferencesWindow(qltk.UniqueWindow):
                 _("Reload all songs in your library. "
                   "(this can take a long time)"))
 
+            refresh_cb = CCB(_("_Refresh library on start"),
+                             "library", "refresh_on_start", populate=True)
+
+            watch_cb = CCB(_("_Watch library for updates"),
+                           "library", "auto_update", populate=True)
+            watch_cb.set_tooltip_text(_("Use file watching to track changes "
+                                        "that happen to directories in your "
+                                        "library and update QL automatically"))
+
             grid = Gtk.Grid(column_spacing=6, row_spacing=6)
-            cb.props.hexpand = True
-            grid.attach(cb, 0, 0, 1, 1)
+            refresh_cb.props.hexpand = True
+            grid.attach(refresh_cb, 0, 0, 1, 1)
             grid.attach(refresh, 1, 0, 1, 1)
+            grid.attach(watch_cb, 0, 1, 1, 1)
             grid.attach(reload_, 1, 1, 1, 1)
 
             vb3.pack_start(grid, False, True, 0)
