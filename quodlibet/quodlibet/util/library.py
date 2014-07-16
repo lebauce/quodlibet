@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2004-2013 Joe Wreschnig, Michael Urman, Iñigo Serna,
+# Copyright 2004-2014 Joe Wreschnig, Michael Urman, Iñigo Serna,
 #     Christoph Reiter, Nick Boultbee
 #
 # This program is free software; you can redistribute it and/or modify
@@ -46,6 +46,11 @@ def get_scan_dirs():
     return [util.fsnative(d) for d in dirs if d]
 
 
+def get_excluded_scan_dirs():
+    dirs = split_scan_dirs(config.get("library", "exclude"))
+    return [util.fsnative(d) for d in dirs if d]
+
+
 def set_scan_dirs(dirs):
     if sys.platform == "win32":
         joined = ":".join(dirs)
@@ -61,8 +66,7 @@ def scan_library(library, force):
     """
 
     paths = get_scan_dirs()
-    exclude = split_scan_dirs(config.get("library", "exclude"))
-    exclude = [util.fsnative(e) for e in exclude]
+    exclude = get_excluded_scan_dirs()
     copool.add(library.rebuild, paths, force, exclude,
                cofuncid="library", funcid="library")
 
