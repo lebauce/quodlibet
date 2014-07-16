@@ -33,7 +33,7 @@ from quodlibet import const
 from quodlibet import formats
 from quodlibet.util.dprint import print_d, print_w
 from quodlibet.util.path import fsdecode, expanduser, unexpand, mkdir, \
-    normalize_path
+    normalize_path, fsencode, is_fsnative
 
 
 class Library(GObject.GObject, DictMixin):
@@ -816,17 +816,27 @@ class WatchedFileLibrary(FileLibrary):
 
     def monitor_dir(self, path):
         """Monitors a single directory"""
+
+        assert is_fsnative(path)
+
         normalised = normalize_path(path, True)
         # Only add one monitor per absolute path...
         if normalised not in self.__monitors:
-            f = Gio.File.parse_name(normalised)
-            monitor = f.monitor_directory(Gio.FileMonitorFlags.NONE, None)
+            f = Gio.File.new_for_path(fsencode(normalised))
+            try:
+                monitor = f.monitor_directory(Gio.FileMonitorFlags.NONE, None)
+            except GLib.GError:
+                return
             handler_id = monitor.connect("changed", self.__file_changed)
             # Don't destroy references - http://stackoverflow.com/q/4535227
             self.__monitors[path] = (monitor, handler_id)
 
     def __file_changed(self, monitor, main_file, other_file, event):
-        file_path = normalize_path(main_file.get_path(), True)
+        file_path = main_file.get_path()
+        if file_path is None:
+            return
+        file_path = normalize_path(util.fsnative(file_path), True)
+
         if event == Gio.FileMonitorEvent.CREATED:
             if os.path.isdir(file_path):
                 print_d("Monitoring new directory %s" % (file_path,))
@@ -878,10 +888,12 @@ class WatchedFileLibrary(FileLibrary):
 
     def unmonitor_dir(self, path):
         """Disconnect and remove any monitor for a directory, if found"""
+
+        assert is_fsnative(path)
+
         monitor, handler_id = self.__monitors.get(path, (None, None))
         if not monitor:
-            print_d("Couldn't find path %s in active monitors: %s" %
-                    (path, self.__monitors.keys()))
+            print_d("Couldn't find path %s in active monitors" % path)
             return
         print_d("Un-monitoring %s" % path)
         monitor.disconnect(handler_id)
@@ -899,8 +911,7 @@ class WatchedFileLibrary(FileLibrary):
         paths = get_scan_dirs()
         print_d("Setting up file watches for %s on %s..."
                 % (type(self), paths))
-        exclude = [expanduser(util.fsnative(e))
-                   for e in get_excluded_scan_dirs() if e]
+        exclude = [expanduser(e) for e in get_excluded_scan_dirs() if e]
 
         def watching_producer():
             # TODO: integrate this better with scanning.
@@ -912,7 +923,7 @@ class WatchedFileLibrary(FileLibrary):
                     if filter(fullpath.startswith, exclude):
                         continue
                     unpulsed = 0
-                    for path, dirs, files in os.walk(util.fsnative(fullpath)):
+                    for path, dirs, files in os.walk(fullpath):
                         for d in dirs:
                             self.monitor_dir(os.path.join(path, d))
                         unpulsed += len(dirs)
