@@ -891,7 +891,6 @@ class WatchedFileLibrary(FileLibrary):
         if not monitor:
             print_d("Couldn't find path %s in active monitors" % path)
             return
-        print_d("Un-monitoring %s" % path)
         monitor.disconnect(handler_id)
         del self.__monitors[path]
 
