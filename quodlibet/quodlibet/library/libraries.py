@@ -869,11 +869,12 @@ class WatchedFileLibrary(FileLibrary):
 
                 # And try to remove all songs under that dir. Slowly.
                 gone = []
-                print_d("Removing any songs in %s" % file_path)
                 for key, song in self.iteritems():
                     if key.startswith(path_fragment):
                         gone.append(song)
-                self.remove(gone)
+                if gone:
+                    print_d("Removing %d songs in %s" % (len(gone), file_path))
+                    self.remove(gone)
         elif event == Gio.FileMonitorEvent.CHANGED:
             song = self.get(file_path)
             if song and not song.valid():
