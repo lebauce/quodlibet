@@ -845,8 +845,15 @@ class WatchedFileLibrary(FileLibrary):
                     # Just consume.
                     pass
                 return
-            print_d("Auto-adding new file: %s" % file_path)
-            self.add_filename(file_path)
+            else:
+                song = self.get(file_path)
+                if song:
+                    # QL created this one; still check if it changed
+                    if not song.valid():
+                        self.reload(song)
+                else:
+                    print_d("Auto-adding new file: %s" % file_path)
+                    self.add_filename(file_path)
         elif event == Gio.FileMonitorEvent.DELETED:
             song = self.get(file_path)
             if song:
@@ -854,8 +861,8 @@ class WatchedFileLibrary(FileLibrary):
                 self.reload(song)
             else:
                 # either not a song, or a song that was renamed by QL
-
-                self.unmonitor_dir(file_path)
+                if self.is_monitored_dir(file_path):
+                    self.unmonitor_dir(file_path)
                 # Make sure they are in this sub-dir, not similar files
                 path_fragment = (file_path if file_path.endswith(os.sep)
                                  else file_path + os.sep)
@@ -869,7 +876,7 @@ class WatchedFileLibrary(FileLibrary):
                 self.remove(gone)
         elif event == Gio.FileMonitorEvent.CHANGED:
             song = self.get(file_path)
-            if song:
+            if song and not song.valid():
                 print_d("Updating externally changed song: %s" % file_path)
                 self.reload(song)
         elif event == Gio.FileMonitorEvent.CHANGES_DONE_HINT:
@@ -881,6 +888,10 @@ class WatchedFileLibrary(FileLibrary):
             pass
         else:
             print_d("Unhandled event %s on %s" % (event, file_path))
+
+    def is_monitored_dir(self, path):
+        assert is_fsnative(path)
+        return path in self.__monitors
 
     def unmonitor_dir(self, path):
         """Disconnect and remove any monitor for a directory, if found"""
