@@ -9,6 +9,14 @@ DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 source "$DIR"/_base.sh
 
-build_all;
+download_and_verify;
 
+init_wine;
+init_build_env;
+extract_deps;
+
+setup_deps;
+install_python;
+
+cleanup;
 setup_sdk;
