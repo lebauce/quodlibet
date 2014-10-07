@@ -1,0 +1,42 @@
+syntax: glob
+*.pyc
+*.pyo
+*.so
+*.swp
+*.rej
+*.orig
+*.cache
+*.cover
+*.pot
+*.mo
+*.tar.gz
+MANIFEST
+
+po/missing
+po/notexist
+
+# Sphinx build files
+_build*/*
+_rtd_theme*
+
+# Ignore build files
+quodlibet/build/*
+quodlibet/dist/*
+
+# Ignore Eclipse files
+.buildpath
+.project
+.settings/*
+.pydevproject
+
+# And IDEA
+.idea/*
+
+# Windows Installer
+win_installer/_bin
+win_installer/_build_env
+win_installer/_sdk
+win_installer/*.exe
+
+# coverage.py html report
+quodlibet/coverage/*
