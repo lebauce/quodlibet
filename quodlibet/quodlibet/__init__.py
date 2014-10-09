@@ -148,6 +148,7 @@ def _gtk_init(icon=None):
         warnings.simplefilter("ignore")
         settings.set_property("gtk-button-images", True)
         settings.set_property("gtk-menu-images", True)
+    if hasattr(settings.props, "gtk_primary_button_warps_slider"):
         settings.set_property("gtk-primary-button-warps-slider", True)
 
     # Make sure PyGObject includes support for foreign cairo structs
@@ -183,6 +184,27 @@ def _gtk_init(icon=None):
                 border: 1px solid @borders;
             }
         """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(),
+            style_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+    if sys.platform == "darwin":
+        # fix duplicated shadows for popups with Gtk+3.14
+        style_provider = Gtk.CssProvider()
+        style_provider.load_from_data("""
+            GtkWindow {
+                box-shadow: none;
+            }
+            .tooltip {
+                border-radius: 0;
+                padding: 0;
+            }
+            .tooltip.background {
+                background-clip: border-box;
+            }
+            """)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
             style_provider,
